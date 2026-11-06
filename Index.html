@@ -1,0 +1,936 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>모던 스도쿠 (Sudoku Master)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@400;500;600;700;800&display=swap');
+
+    * {
+      font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      user-select: none;
+      -webkit-user-select: none;
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    /* 스도쿠 보드 및 그리드 세부 스타일 */
+    .sudoku-grid {
+      display: grid;
+      grid-template-columns: repeat(9, 1fr);
+      aspect-ratio: 1 / 1;
+      border: 3px solid #1e293b;
+      border-radius: 12px;
+      overflow: hidden;
+      background-color: #334155;
+      gap: 1px;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+    }
+
+    .cell {
+      position: relative;
+      background-color: #ffffff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: clamp(1.2rem, 4vw, 1.85rem);
+      font-weight: 600;
+      color: #1e293b;
+      cursor: pointer;
+      transition: background-color 0.15s ease;
+    }
+
+    /* 3x3 구역 구분선 */
+    .border-right-thick {
+      border-right: 2.5px solid #1e293b !important;
+    }
+    .border-bottom-thick {
+      border-bottom: 2.5px solid #1e293b !important;
+    }
+
+    /* 셀 하이라이트 상태 */
+    .cell.selected {
+      background-color: #bbdefb !important;
+    }
+    .cell.highlight-peer {
+      background-color: #f1f5f9;
+    }
+    .cell.highlight-match {
+      background-color: #dbeafe !important;
+    }
+    .cell.given {
+      font-weight: 800;
+      color: #0f172a;
+    }
+    .cell.user-input {
+      color: #2563eb;
+    }
+    .cell.error {
+      background-color: #fee2e2 !important;
+      color: #dc2626 !important;
+    }
+
+    /* 메모(후보수) 스타일 */
+    .notes-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      grid-template-rows: repeat(3, 1fr);
+      width: 100%;
+      height: 100%;
+      padding: 2px;
+      pointer-events: none;
+    }
+    .note-num {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: clamp(0.55rem, 1.6vw, 0.75rem);
+      font-weight: 700;
+      color: #64748b;
+      line-height: 1;
+    }
+
+    /* 액티브 토글 버튼 */
+    .btn-toggle-active {
+      background-color: #2563eb !important;
+      color: #ffffff !important;
+      border-color: #1d4ed8 !important;
+    }
+
+    /* 모달 애니메이션 */
+    .modal-enter {
+      opacity: 0;
+      transform: scale(0.95);
+    }
+    .modal-enter-active {
+      opacity: 1;
+      transform: scale(1);
+      transition: opacity 0.2s ease-out, transform 0.2s ease-out;
+    }
+  </style>
+</head>
+<body class="bg-slate-50 min-h-screen text-slate-800 flex flex-col justify-between items-center p-3 sm:p-5">
+
+  <!-- 헤더 영역 -->
+  <header class="w-full max-w-md flex items-center justify-between py-2 border-b border-slate-200">
+    <div class="flex items-center gap-2">
+      <span class="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center font-black shadow-md shadow-blue-200">
+        <i class="fa-solid fa-shapes text-sm"></i>
+      </span>
+      <h1 class="text-xl font-bold tracking-tight text-slate-800">스도쿠</h1>
+    </div>
+
+    <!-- 타이머 & 새 게임 버튼 -->
+    <div class="flex items-center gap-3">
+      <div class="flex items-center gap-1.5 text-slate-600 bg-white border border-slate-200 px-3 py-1.5 rounded-full shadow-sm text-sm font-semibold">
+        <i class="fa-regular fa-clock text-blue-500"></i>
+        <span id="timer-display">00:00</span>
+      </div>
+      <button id="btn-new-game-modal" class="px-3 py-1.5 rounded-full bg-slate-800 hover:bg-slate-700 active:scale-95 text-white font-medium text-xs sm:text-sm transition shadow-sm">
+        새 게임
+      </button>
+    </div>
+  </header>
+
+  <!-- 메인 게임 영역 -->
+  <main class="w-full max-w-md flex flex-col gap-3 my-auto items-center">
+    
+    <!-- 난이도 및 오류 횟수 정보 바 -->
+    <div class="w-full flex justify-between items-center px-1 text-sm">
+      <div class="flex items-center gap-2">
+        <span class="text-xs uppercase px-2.5 py-1 rounded-md bg-blue-100 text-blue-700 font-bold" id="current-difficulty-tag">
+          보통
+        </span>
+      </div>
+      <div class="text-slate-500 text-xs sm:text-sm font-medium">
+        오류: <span id="error-count" class="font-bold text-red-600">0</span> / 3
+      </div>
+    </div>
+
+    <!-- 스도쿠 9x9 보드 컨테이너 -->
+    <div class="w-full">
+      <div id="board" class="sudoku-grid">
+        <!-- 셀 81개가 JS로 렌더링됩니다 -->
+      </div>
+    </div>
+
+    <!-- 도구 바 (되돌리기, 지우기, 메모, 힌트) -->
+    <div class="w-full grid grid-cols-4 gap-2 pt-1">
+      <button id="tool-undo" class="flex flex-col items-center justify-center py-2.5 px-1 rounded-xl bg-white border border-slate-200 text-slate-700 shadow-sm active:scale-95 transition hover:bg-slate-100">
+        <i class="fa-solid fa-rotate-left text-lg mb-1 text-slate-600"></i>
+        <span class="text-xs font-medium">실행취소</span>
+      </button>
+
+      <button id="tool-erase" class="flex flex-col items-center justify-center py-2.5 px-1 rounded-xl bg-white border border-slate-200 text-slate-700 shadow-sm active:scale-95 transition hover:bg-slate-100">
+        <i class="fa-solid fa-eraser text-lg mb-1 text-slate-600"></i>
+        <span class="text-xs font-medium">지우기</span>
+      </button>
+
+      <button id="tool-note" class="relative flex flex-col items-center justify-center py-2.5 px-1 rounded-xl bg-white border border-slate-200 text-slate-700 shadow-sm active:scale-95 transition hover:bg-slate-100">
+        <i class="fa-solid fa-pencil text-lg mb-1"></i>
+        <span class="text-xs font-medium">메모</span>
+        <span id="note-badge" class="absolute top-1 right-2 w-2 h-2 rounded-full bg-slate-300"></span>
+      </button>
+
+      <button id="tool-hint" class="flex flex-col items-center justify-center py-2.5 px-1 rounded-xl bg-white border border-slate-200 text-slate-700 shadow-sm active:scale-95 transition hover:bg-slate-100">
+        <div class="relative">
+          <i class="fa-regular fa-lightbulb text-lg mb-1 text-amber-500"></i>
+          <span id="hint-count-badge" class="absolute -top-1 -right-3 text-[10px] bg-blue-600 text-white rounded-full w-4 h-4 flex items-center justify-center font-bold">3</span>
+        </div>
+        <span class="text-xs font-medium">힌트</span>
+      </button>
+    </div>
+
+    <!-- 숫자 입력 패드 (1-9) -->
+    <div class="w-full grid grid-cols-9 gap-1.5 mt-1">
+      <button class="numpad-btn h-12 sm:h-14 bg-white border border-slate-200 rounded-xl font-bold text-xl sm:text-2xl text-blue-600 shadow-sm active:bg-blue-600 active:text-white transition flex items-center justify-center" data-val="1">1</button>
+      <button class="numpad-btn h-12 sm:h-14 bg-white border border-slate-200 rounded-xl font-bold text-xl sm:text-2xl text-blue-600 shadow-sm active:bg-blue-600 active:text-white transition flex items-center justify-center" data-val="2">2</button>
+      <button class="numpad-btn h-12 sm:h-14 bg-white border border-slate-200 rounded-xl font-bold text-xl sm:text-2xl text-blue-600 shadow-sm active:bg-blue-600 active:text-white transition flex items-center justify-center" data-val="3">3</button>
+      <button class="numpad-btn h-12 sm:h-14 bg-white border border-slate-200 rounded-xl font-bold text-xl sm:text-2xl text-blue-600 shadow-sm active:bg-blue-600 active:text-white transition flex items-center justify-center" data-val="4">4</button>
+      <button class="numpad-btn h-12 sm:h-14 bg-white border border-slate-200 rounded-xl font-bold text-xl sm:text-2xl text-blue-600 shadow-sm active:bg-blue-600 active:text-white transition flex items-center justify-center" data-val="5">5</button>
+      <button class="numpad-btn h-12 sm:h-14 bg-white border border-slate-200 rounded-xl font-bold text-xl sm:text-2xl text-blue-600 shadow-sm active:bg-blue-600 active:text-white transition flex items-center justify-center" data-val="6">6</button>
+      <button class="numpad-btn h-12 sm:h-14 bg-white border border-slate-200 rounded-xl font-bold text-xl sm:text-2xl text-blue-600 shadow-sm active:bg-blue-600 active:text-white transition flex items-center justify-center" data-val="7">7</button>
+      <button class="numpad-btn h-12 sm:h-14 bg-white border border-slate-200 rounded-xl font-bold text-xl sm:text-2xl text-blue-600 shadow-sm active:bg-blue-600 active:text-white transition flex items-center justify-center" data-val="8">8</button>
+      <button class="numpad-btn h-12 sm:h-14 bg-white border border-slate-200 rounded-xl font-bold text-xl sm:text-2xl text-blue-600 shadow-sm active:bg-blue-600 active:text-white transition flex items-center justify-center" data-val="9">9</button>
+    </div>
+  </main>
+
+  <!-- 하단 팁 가이드 -->
+  <footer class="w-full max-w-md text-center py-2 text-xs text-slate-400">
+    키보드 1~9, 백스페이스(지우기), N키(메모 토글), 방향키 이동 지원
+  </footer>
+
+  <!-- 알림 토스트 (오류 및 알림 표시) -->
+  <div id="toast" class="fixed top-5 left-1/2 -translate-x-1/2 bg-slate-900/90 text-white text-sm px-4 py-2.5 rounded-full shadow-lg opacity-0 pointer-events-none transition-all duration-300 z-50 flex items-center gap-2">
+    <i class="fa-solid fa-circle-info text-blue-400"></i>
+    <span id="toast-msg">알림 메시지</span>
+  </div>
+
+  <!-- 새 게임 난이도 선택 모달 -->
+  <div id="new-game-modal" class="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 z-40 hidden">
+    <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl transform transition-all">
+      <div class="flex justify-between items-center mb-4">
+        <h3 class="text-lg font-bold text-slate-800">새 게임 시작</h3>
+        <button id="btn-close-diff-modal" class="text-slate-400 hover:text-slate-600 text-lg">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+      <p class="text-sm text-slate-500 mb-5">도전할 난이도를 선택해주세요.</p>
+      
+      <div class="flex flex-col gap-2.5">
+        <button class="diff-select-btn w-full py-3 px-4 rounded-xl border border-slate-200 hover:border-emerald-500 hover:bg-emerald-50 text-slate-700 font-semibold text-left flex justify-between items-center transition" data-diff="easy">
+          <span>쉬움 (Easy)</span>
+          <span class="text-xs text-emerald-600 bg-emerald-100 px-2 py-0.5 rounded font-medium">초급</span>
+        </button>
+        <button class="diff-select-btn w-full py-3 px-4 rounded-xl border border-slate-200 hover:border-blue-500 hover:bg-blue-50 text-slate-700 font-semibold text-left flex justify-between items-center transition" data-diff="medium">
+          <span>보통 (Medium)</span>
+          <span class="text-xs text-blue-600 bg-blue-100 px-2 py-0.5 rounded font-medium">표준</span>
+        </button>
+        <button class="diff-select-btn w-full py-3 px-4 rounded-xl border border-slate-200 hover:border-amber-500 hover:bg-amber-50 text-slate-700 font-semibold text-left flex justify-between items-center transition" data-diff="hard">
+          <span>어려움 (Hard)</span>
+          <span class="text-xs text-amber-600 bg-amber-100 px-2 py-0.5 rounded font-medium">상급</span>
+        </button>
+        <button class="diff-select-btn w-full py-3 px-4 rounded-xl border border-slate-200 hover:border-rose-500 hover:bg-rose-50 text-slate-700 font-semibold text-left flex justify-between items-center transition" data-diff="expert">
+          <span>전문가 (Expert)</span>
+          <span class="text-xs text-rose-600 bg-rose-100 px-2 py-0.5 rounded font-medium">도전</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 게임 완료 / 게임 오버 모달 -->
+  <div id="game-status-modal" class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50 hidden">
+    <div class="bg-white rounded-3xl max-w-sm w-full p-6 text-center shadow-2xl">
+      <div id="status-icon-container" class="w-16 h-16 mx-auto rounded-2xl flex items-center justify-center mb-4 text-3xl">
+        <!-- JS로 동적 아이콘 삽입 -->
+      </div>
+      <h3 id="status-title" class="text-2xl font-bold text-slate-800 mb-1">축하합니다!</h3>
+      <p id="status-desc" class="text-sm text-slate-500 mb-6">스도쿠 퍼즐을 성공적으로 풀었습니다.</p>
+
+      <div class="bg-slate-50 border border-slate-100 rounded-2xl p-4 mb-6 flex justify-around">
+        <div>
+          <span class="block text-xs text-slate-400">소요 시간</span>
+          <span id="modal-time-record" class="text-lg font-bold text-slate-700">00:00</span>
+        </div>
+        <div class="w-px bg-slate-200"></div>
+        <div>
+          <span class="block text-xs text-slate-400">난이도</span>
+          <span id="modal-diff-record" class="text-lg font-bold text-slate-700">보통</span>
+        </div>
+      </div>
+
+      <button id="btn-restart" class="w-full py-3.5 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-bold rounded-xl shadow-lg shadow-blue-200 transition">
+        다시 플레이하기
+      </button>
+    </div>
+  </div>
+
+  <script>
+    /**
+     * 스도쿠 게임 핵심 엔진 & UI 컨트롤러
+     */
+    (function () {
+      // 게임 상태 관리
+      const GameState = {
+        solution: [],       // 완성된 9x9 솔루션
+        puzzle: [],         // 현재 사용자가 보는 9x9 보드 (0은 빈칸)
+        initialPuzzle: [],  // 최초 제공된 불변 문제판
+        notes: [],          // 셀별 후보수 메모 [row][col] -> Set
+        history: [],        // 되돌리기(Undo)용 히스토리 스택
+        selectedCell: null, // { r: number, c: number }
+        isNoteMode: false,
+        hintsLeft: 3,
+        errors: 0,
+        maxErrors: 3,
+        difficulty: 'medium',
+        isGameOver: false,
+        timerSeconds: 0,
+        timerInterval: null
+      };
+
+      // 난이도별 빈칸 제거 개수 설정
+      const DIFFICULTY_REMOVALS = {
+        easy: 32,      // 빈칸 32개 남김 (비교적 쉬움)
+        medium: 42,    // 빈칸 42개
+        hard: 50,      // 빈칸 50개
+        expert: 56     // 빈칸 56개
+      };
+
+      const DIFFICULTY_LABELS = {
+        easy: { text: '쉬움', color: 'bg-emerald-100 text-emerald-700' },
+        medium: { text: '보통', color: 'bg-blue-100 text-blue-700' },
+        hard: { text: '어려움', color: 'bg-amber-100 text-amber-700' },
+        expert: { text: '전문가', color: 'bg-rose-100 text-rose-700' }
+      };
+
+      // DOM 요소 캐싱
+      const boardEl = document.getElementById('board');
+      const timerEl = document.getElementById('timer-display');
+      const currentDiffTag = document.getElementById('current-difficulty-tag');
+      const errorCountEl = document.getElementById('error-count');
+      const hintCountBadge = document.getElementById('hint-count-badge');
+      const noteBadge = document.getElementById('note-badge');
+      const toolNoteBtn = document.getElementById('tool-note');
+      const toolUndoBtn = document.getElementById('tool-undo');
+      const toolEraseBtn = document.getElementById('tool-erase');
+      const toolHintBtn = document.getElementById('tool-hint');
+      const newGameModal = document.getElementById('new-game-modal');
+      const gameStatusModal = document.getElementById('game-status-modal');
+      const toastEl = document.getElementById('toast');
+      const toastMsgEl = document.getElementById('toast-msg');
+
+      /* ==========================================================
+       * 1. 스도쿠 알고리즘 (유효성 검사, 해결기, 생성기)
+       * ========================================================== */
+
+      // 특정 셀에 num 배치 가능 여부 검사
+      function isValid(grid, r, c, num) {
+        for (let i = 0; i < 9; i++) {
+          if (grid[r][i] === num) return false;
+          if (grid[i][c] === num) return false;
+        }
+        const startRow = Math.floor(r / 3) * 3;
+        const startCol = Math.floor(c / 3) * 3;
+        for (let i = 0; i < 3; i++) {
+          for (let j = 0; j < 3; j++) {
+            if (grid[startRow + i][startCol + j] === num) return false;
+          }
+        }
+        return true;
+      }
+
+      // 백트래킹을 활용한 스도쿠 완성판 생성
+      function solveSudoku(grid) {
+        for (let r = 0; r < 9; r++) {
+          for (let c = 0; c < 9; c++) {
+            if (grid[r][c] === 0) {
+              const nums = [1, 2, 3, 4, 5, 6, 7, 8, 9].sort(() => Math.random() - 0.5);
+              for (const num of nums) {
+                if (isValid(grid, r, c, num)) {
+                  grid[r][c] = num;
+                  if (solveSudoku(grid)) return true;
+                  grid[r][c] = 0;
+                }
+              }
+              return false;
+            }
+          }
+        }
+        return true;
+      }
+
+      // 난이도에 맞는 문제 생성
+      function generateSudoku(diff) {
+        // 빈 보드 생성
+        const solution = Array.from({ length: 9 }, () => Array(9).fill(0));
+        solveSudoku(solution);
+
+        // 보드 복제 후 난이도에 맞게 셀 제거
+        const puzzle = solution.map(row => [...row]);
+        const cellsToRemove = DIFFICULTY_REMOVALS[diff] || 40;
+
+        const positions = [];
+        for (let r = 0; r < 9; r++) {
+          for (let c = 0; c < 9; c++) {
+            positions.push([r, c]);
+          }
+        }
+        positions.sort(() => Math.random() - 0.5);
+
+        for (let i = 0; i < cellsToRemove; i++) {
+          const [r, c] = positions[i];
+          puzzle[r][c] = 0;
+        }
+
+        return { solution, puzzle };
+      }
+
+      /* ==========================================================
+       * 2. 게임 라이프사이클 및 상태 관리
+       * ========================================================== */
+
+      function startNewGame(difficulty = 'medium') {
+        GameState.difficulty = difficulty;
+        const { solution, puzzle } = generateSudoku(difficulty);
+        GameState.solution = solution;
+        GameState.puzzle = puzzle.map(r => [...r]);
+        GameState.initialPuzzle = puzzle.map(r => [...r]);
+
+        // 메모 초기화
+        GameState.notes = Array.from({ length: 9 }, () =>
+          Array.from({ length: 9 }, () => new Set())
+        );
+
+        GameState.history = [];
+        GameState.selectedCell = null;
+        GameState.isNoteMode = false;
+        GameState.hintsLeft = 3;
+        GameState.errors = 0;
+        GameState.isGameOver = false;
+
+        // UI 갱신
+        updateDiffTagUI();
+        updateErrorUI();
+        updateHintBadgeUI();
+        setNoteMode(false);
+        renderBoard();
+
+        // 첫번째 빈 셀 자동 선택
+        selectFirstEmptyCell();
+
+        // 타이머 재설정
+        resetTimer();
+        startTimer();
+      }
+
+      function selectFirstEmptyCell() {
+        for (let r = 0; r < 9; r++) {
+          for (let c = 0; c < 9; c++) {
+            if (GameState.initialPuzzle[r][c] === 0) {
+              selectCell(r, c);
+              return;
+            }
+          }
+        }
+      }
+
+      function updateDiffTagUI() {
+        const info = DIFFICULTY_LABELS[GameState.difficulty];
+        currentDiffTag.textContent = info.text;
+        currentDiffTag.className = `text-xs uppercase px-2.5 py-1 rounded-md font-bold ${info.color}`;
+      }
+
+      function updateErrorUI() {
+        errorCountEl.textContent = GameState.errors;
+        if (GameState.errors >= GameState.maxErrors) {
+          triggerGameOver(false);
+        }
+      }
+
+      function updateHintBadgeUI() {
+        hintCountBadge.textContent = GameState.hintsLeft;
+      }
+
+      /* ==========================================================
+       * 3. 타이머 제어
+       * ========================================================== */
+
+      function startTimer() {
+        clearInterval(GameState.timerInterval);
+        GameState.timerInterval = setInterval(() => {
+          if (!GameState.isGameOver) {
+            GameState.timerSeconds++;
+            const min = String(Math.floor(GameState.timerSeconds / 60)).padStart(2, '0');
+            const sec = String(GameState.timerSeconds % 60).padStart(2, '0');
+            timerEl.textContent = `${min}:${sec}`;
+          }
+        }, 1000);
+      }
+
+      function resetTimer() {
+        clearInterval(GameState.timerInterval);
+        GameState.timerSeconds = 0;
+        timerEl.textContent = '00:00';
+      }
+
+      /* ==========================================================
+       * 4. 보드 UI 렌더링 및 인터랙션
+       * ========================================================== */
+
+      function renderBoard() {
+        boardEl.innerHTML = '';
+        for (let r = 0; r < 9; r++) {
+          for (let c = 0; c < 9; c++) {
+            const cell = document.createElement('div');
+            cell.classList.add('cell');
+            cell.dataset.row = r;
+            cell.dataset.col = c;
+
+            // 3x3 굵은 구분선 클래스 부여
+            if (c === 2 || c === 5) cell.classList.add('border-right-thick');
+            if (r === 2 || r === 5) cell.classList.add('border-bottom-thick');
+
+            // 기본 제공된 숫자와 사용자 입력 구분
+            if (GameState.initialPuzzle[r][c] !== 0) {
+              cell.textContent = GameState.initialPuzzle[r][c];
+              cell.classList.add('given');
+            } else if (GameState.puzzle[r][c] !== 0) {
+              cell.textContent = GameState.puzzle[r][c];
+              cell.classList.add('user-input');
+              // 오답 체크
+              if (GameState.puzzle[r][c] !== GameState.solution[r][c]) {
+                cell.classList.add('error');
+              }
+            } else {
+              // 빈칸일 경우 메모 렌더링
+              renderNotes(cell, r, c);
+            }
+
+            cell.addEventListener('click', () => selectCell(r, c));
+            boardEl.appendChild(cell);
+          }
+        }
+        highlightConnectedCells();
+      }
+
+      // 메모 렌더링 도우미
+      function renderNotes(cellEl, r, c) {
+        const notesSet = GameState.notes[r][c];
+        if (notesSet && notesSet.size > 0) {
+          const notesGrid = document.createElement('div');
+          notesGrid.className = 'notes-grid';
+          for (let i = 1; i <= 9; i++) {
+            const span = document.createElement('span');
+            span.className = 'note-num';
+            span.textContent = notesSet.has(i) ? i : '';
+            notesGrid.appendChild(span);
+          }
+          cellEl.innerHTML = '';
+          cellEl.appendChild(notesGrid);
+        }
+      }
+
+      function getCellElement(r, c) {
+        return boardEl.querySelector(`[data-row="${r}"][data-col="${c}"]`);
+      }
+
+      // 셀 선택 처리
+      function selectCell(r, c) {
+        if (GameState.isGameOver) return;
+        GameState.selectedCell = { r, c };
+        highlightConnectedCells();
+      }
+
+      // 같은 행, 열, 3x3 박스 및 같은 숫자 하이라이트
+      function highlightConnectedCells() {
+        const cells = boardEl.querySelectorAll('.cell');
+        cells.forEach(c => {
+          c.classList.remove('selected', 'highlight-peer', 'highlight-match');
+        });
+
+        if (!GameState.selectedCell) return;
+        const { r: selR, c: selC } = GameState.selectedCell;
+        const selectedVal = GameState.puzzle[selR][selC];
+
+        cells.forEach(cell => {
+          const r = parseInt(cell.dataset.row, 10);
+          const c = parseInt(cell.dataset.col, 10);
+          const val = GameState.puzzle[r][c];
+
+          // 선택된 셀 자신
+          if (r === selR && c === selC) {
+            cell.classList.add('selected');
+            return;
+          }
+
+          // 같은 행, 같은 열, 같은 3x3 박스
+          const isSameRow = r === selR;
+          const isSameCol = c === selC;
+          const isSameBox = Math.floor(r / 3) === Math.floor(selR / 3) &&
+                            Math.floor(c / 3) === Math.floor(selC / 3);
+
+          if (isSameRow || isSameCol || isSameBox) {
+            cell.classList.add('highlight-peer');
+          }
+
+          // 같은 숫자가 적혀 있는 셀 강조
+          if (selectedVal !== 0 && val === selectedVal) {
+            cell.classList.add('highlight-match');
+          }
+        });
+      }
+
+      /* ==========================================================
+       * 5. 숫자 입력 및 도구 로직
+       * ========================================================== */
+
+      function inputNumber(num) {
+        if (GameState.isGameOver || !GameState.selectedCell) return;
+        const { r, c } = GameState.selectedCell;
+
+        // 초기에 주어진 고정 숫자는 수정 불가
+        if (GameState.initialPuzzle[r][c] !== 0) {
+          showToast('고정된 숫자는 변경할 수 없습니다.');
+          return;
+        }
+
+        // 메모 모드인 경우
+        if (GameState.isNoteMode) {
+          const currentNotes = GameState.notes[r][c];
+          // 이미 숫자가 채워져 있다면 메모 불가
+          if (GameState.puzzle[r][c] !== 0) return;
+
+          // 이전 상태 히스토리 저장
+          saveHistoryState();
+
+          if (currentNotes.has(num)) {
+            currentNotes.delete(num);
+          } else {
+            currentNotes.add(num);
+          }
+          renderCell(r, c);
+          return;
+        }
+
+        // 일반 숫자 입력 모드
+        if (GameState.puzzle[r][c] === num) return; // 동일한 숫자일 경우 변화 없음
+
+        saveHistoryState();
+
+        const isCorrect = GameState.solution[r][c] === num;
+        GameState.puzzle[r][c] = num;
+        GameState.notes[r][c].clear(); // 숫자 입력 시 메모는 지움
+
+        if (!isCorrect) {
+          GameState.errors++;
+          updateErrorUI();
+          showToast(`틀렸습니다! (${GameState.errors}/${GameState.maxErrors})`);
+        } else {
+          // 정답 입력 시 주변 관련 셀들의 메모에서 해당 숫자 자동 제거
+          removeNoteFromPeers(r, c, num);
+        }
+
+        renderCell(r, c);
+        highlightConnectedCells();
+        checkGameCompletion();
+      }
+
+      // 특정 셀 재렌더링
+      function renderCell(r, c) {
+        const cellEl = getCellElement(r, c);
+        if (!cellEl) return;
+
+        cellEl.className = 'cell';
+        if (c === 2 || c === 5) cellEl.classList.add('border-right-thick');
+        if (r === 2 || r === 5) cellEl.classList.add('border-bottom-thick');
+
+        const val = GameState.puzzle[r][c];
+        if (GameState.initialPuzzle[r][c] !== 0) {
+          cellEl.textContent = val;
+          cellEl.classList.add('given');
+        } else if (val !== 0) {
+          cellEl.textContent = val;
+          cellEl.classList.add('user-input');
+          if (val !== GameState.solution[r][c]) {
+            cellEl.classList.add('error');
+          }
+        } else {
+          cellEl.textContent = '';
+          renderNotes(cellEl, r, c);
+        }
+      }
+
+      // 정답 입력 시 해당 행, 열, 3x3 블록에서 동일 메모 제거
+      function removeNoteFromPeers(row, col, num) {
+        for (let i = 0; i < 9; i++) {
+          GameState.notes[row][i].delete(num);
+          GameState.notes[i][col].delete(num);
+          renderCell(row, i);
+          renderCell(i, col);
+        }
+        const startRow = Math.floor(row / 3) * 3;
+        const startCol = Math.floor(col / 3) * 3;
+        for (let i = 0; i < 3; i++) {
+          for (let j = 0; j < 3; j++) {
+            GameState.notes[startRow + i][startCol + j].delete(num);
+            renderCell(startRow + i, startCol + j);
+          }
+        }
+      }
+
+      // 지우기
+      function eraseSelected() {
+        if (GameState.isGameOver || !GameState.selectedCell) return;
+        const { r, c } = GameState.selectedCell;
+
+        if (GameState.initialPuzzle[r][c] !== 0) {
+          showToast('고정된 숫자는 지울 수 없습니다.');
+          return;
+        }
+
+        if (GameState.puzzle[r][c] !== 0 || GameState.notes[r][c].size > 0) {
+          saveHistoryState();
+          GameState.puzzle[r][c] = 0;
+          GameState.notes[r][c].clear();
+          renderCell(r, c);
+          highlightConnectedCells();
+        }
+      }
+
+      // 힌트 제공
+      function useHint() {
+        if (GameState.isGameOver) return;
+        if (GameState.hintsLeft <= 0) {
+          showToast('남은 힌트가 없습니다!');
+          return;
+        }
+
+        // 현재 비어있거나 틀린 셀 리스트
+        const candidates = [];
+        for (let r = 0; r < 9; r++) {
+          for (let c = 0; c < 9; c++) {
+            if (GameState.initialPuzzle[r][c] === 0 && GameState.puzzle[r][c] !== GameState.solution[r][c]) {
+              candidates.push({ r, c });
+            }
+          }
+        }
+
+        if (candidates.length === 0) return;
+
+        // 선택된 셀이 유효하지 않으면 현재 선택된 셀을 우선 정답 처리하거나, 첫 후보 선택
+        let target = candidates[0];
+        if (GameState.selectedCell) {
+          const { r, c } = GameState.selectedCell;
+          if (GameState.puzzle[r][c] !== GameState.solution[r][c]) {
+            target = { r, c };
+          }
+        }
+
+        saveHistoryState();
+        GameState.hintsLeft--;
+        updateHintBadgeUI();
+
+        const correctNum = GameState.solution[target.r][target.c];
+        GameState.puzzle[target.r][target.c] = correctNum;
+        GameState.notes[target.r][target.c].clear();
+        removeNoteFromPeers(target.r, target.c, correctNum);
+
+        selectCell(target.r, target.c);
+        renderCell(target.r, target.c);
+        highlightConnectedCells();
+
+        showToast(`힌트로 ${correctNum}을(를) 채웠습니다!`);
+        checkGameCompletion();
+      }
+
+      // 되돌리기(Undo)
+      function undoAction() {
+        if (GameState.history.length === 0 || GameState.isGameOver) {
+          showToast('되돌릴 동작이 없습니다.');
+          return;
+        }
+
+        const prevState = GameState.history.pop();
+        GameState.puzzle = prevState.puzzle;
+        GameState.notes = prevState.notes.map(r => r.map(set => new Set(set)));
+        GameState.selectedCell = prevState.selectedCell;
+
+        renderBoard();
+        highlightConnectedCells();
+      }
+
+      function saveHistoryState() {
+        // 깊은 복사하여 히스토리 스택에 저장 (최대 20개 유지)
+        const puzzleSnapshot = GameState.puzzle.map(row => [...row]);
+        const notesSnapshot = GameState.notes.map(row => row.map(set => new Set(set)));
+        GameState.history.push({
+          puzzle: puzzleSnapshot,
+          notes: notesSnapshot,
+          selectedCell: GameState.selectedCell ? { ...GameState.selectedCell } : null
+        });
+
+        if (GameState.history.length > 25) {
+          GameState.history.shift();
+        }
+      }
+
+      function setNoteMode(enable) {
+        GameState.isNoteMode = enable;
+        if (enable) {
+          toolNoteBtn.classList.add('btn-toggle-active');
+          noteBadge.classList.replace('bg-slate-300', 'bg-blue-300');
+        } else {
+          toolNoteBtn.classList.remove('btn-toggle-active');
+          noteBadge.classList.replace('bg-blue-300', 'bg-slate-300');
+        }
+      }
+
+      /* ==========================================================
+       * 6. 승리/패배 검증 및 알림 모달
+       * ========================================================== */
+
+      function checkGameCompletion() {
+        for (let r = 0; r < 9; r++) {
+          for (let c = 0; c < 9; c++) {
+            if (GameState.puzzle[r][c] !== GameState.solution[r][c]) {
+              return false; // 빈칸이 있거나 오류가 남아있음
+            }
+          }
+        }
+        // 완성!
+        triggerGameOver(true);
+        return true;
+      }
+
+      function triggerGameOver(isWin) {
+        GameState.isGameOver = true;
+        clearInterval(GameState.timerInterval);
+
+        const iconContainer = document.getElementById('status-icon-container');
+        const titleEl = document.getElementById('status-title');
+        const descEl = document.getElementById('status-desc');
+        const recordTimeEl = document.getElementById('modal-time-record');
+        const recordDiffEl = document.getElementById('modal-diff-record');
+
+        recordTimeEl.textContent = timerEl.textContent;
+        recordDiffEl.textContent = DIFFICULTY_LABELS[GameState.difficulty].text;
+
+        if (isWin) {
+          iconContainer.className = 'w-16 h-16 mx-auto rounded-2xl flex items-center justify-center mb-4 text-3xl bg-emerald-100 text-emerald-600';
+          iconContainer.innerHTML = '<i class="fa-solid fa-trophy"></i>';
+          titleEl.textContent = '클리어 축하합니다!';
+          descEl.textContent = '모든 퍼즐을 오류 없이 완벽하게 해결하셨습니다!';
+        } else {
+          iconContainer.className = 'w-16 h-16 mx-auto rounded-2xl flex items-center justify-center mb-4 text-3xl bg-rose-100 text-rose-600';
+          iconContainer.innerHTML = '<i class="fa-solid fa-face-frown"></i>';
+          titleEl.textContent = '게임 오버';
+          descEl.textContent = '허용된 오류 횟수(3회)를 초과하였습니다.';
+        }
+
+        gameStatusModal.classList.remove('hidden');
+      }
+
+      function showToast(message) {
+        toastMsgEl.textContent = message;
+        toastEl.classList.remove('opacity-0', 'pointer-events-none');
+        toastEl.classList.add('opacity-100');
+
+        setTimeout(() => {
+          toastEl.classList.remove('opacity-100');
+          toastEl.classList.add('opacity-0', 'pointer-events-none');
+        }, 1800);
+      }
+
+      /* ==========================================================
+       * 7. 이벤트 리스너 등록
+       * ========================================================== */
+
+      // 숫자패드 버튼
+      document.querySelectorAll('.numpad-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const val = parseInt(btn.dataset.val, 10);
+          inputNumber(val);
+        });
+      });
+
+      // 도구 버튼
+      toolNoteBtn.addEventListener('click', () => {
+        setNoteMode(!GameState.isNoteMode);
+      });
+
+      toolEraseBtn.addEventListener('click', eraseSelected);
+      toolUndoBtn.addEventListener('click', undoAction);
+      toolHintBtn.addEventListener('click', useHint);
+
+      // 모달 제어
+      document.getElementById('btn-new-game-modal').addEventListener('click', () => {
+        newGameModal.classList.remove('hidden');
+      });
+
+      document.getElementById('btn-close-diff-modal').addEventListener('click', () => {
+        newGameModal.classList.add('hidden');
+      });
+
+      document.querySelectorAll('.diff-select-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const diff = btn.dataset.diff;
+          newGameModal.classList.add('hidden');
+          startNewGame(diff);
+        });
+      });
+
+      document.getElementById('btn-restart').addEventListener('click', () => {
+        gameStatusModal.classList.add('hidden');
+        startNewGame(GameState.difficulty);
+      });
+
+      // 키보드 조작 지원 (1~9, 백스페이스, N키, 화살표)
+      window.addEventListener('keydown', (e) => {
+        if (GameState.isGameOver) return;
+
+        // 숫자키 1~9 입력
+        if (e.key >= '1' && e.key <= '9') {
+          inputNumber(parseInt(e.key, 10));
+          return;
+        }
+
+        // 지우기 (Delete 또는 Backspace)
+        if (e.key === 'Backspace' || e.key === 'Delete') {
+          eraseSelected();
+          return;
+        }
+
+        // 메모 모드 토글 (키보드 'n' 또는 'N')
+        if (e.key === 'n' || e.key === 'N') {
+          setNoteMode(!GameState.isNoteMode);
+          return;
+        }
+
+        // 되돌리기 단축키 (Ctrl+Z 또는 Cmd+Z)
+        if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) {
+          e.preventDefault();
+          undoAction();
+          return;
+        }
+
+        // 방향키로 셀 탐색
+        if (GameState.selectedCell && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+          e.preventDefault();
+          let { r, c } = GameState.selectedCell;
+          if (e.key === 'ArrowUp') r = (r - 1 + 9) % 9;
+          if (e.key === 'ArrowDown') r = (r + 1) % 9;
+          if (e.key === 'ArrowLeft') c = (c - 1 + 9) % 9;
+          if (e.key === 'ArrowRight') c = (c + 1) % 9;
+          selectCell(r, c);
+        }
+      });
+
+      // 초기 게임 시작
+      startNewGame('medium');
+    })();
+  </script>
+</body>
+</html>
